@@ -29,6 +29,12 @@
 #define TEMPERATURE_TAG_UPDATE_NORMAL_INTERVAL (10 * 1000)
 #define TEMPERATURE_TAG_UPDATE_SERVICE_INTERVAL (5 * 1000)
 
+#define VOC_TAG_PUB_NO_CHANGE_INTERVAL (15 * 60 * 1000)
+#define VOC_TAG_PUB_VALUE_CHANGE 50.0f
+#define VOC_TAG_UPDATE_NORMAL_INTERVAL (5 * 60 * 1000)
+#define VOC_TAG_UPDATE_SERVICE_INTERVAL (1 * 60 * 1000)
+// #define VOC_TAG_UPDATE_INTERVAL (30 * 1000)
+
 #define LUXMETER_ERROR_MSG "Error"
 
 #if MODULE_POWER
@@ -56,6 +62,9 @@ lux_meter_tag_t lux;
 temperature_tag_t temperature;
 // Thermometer instance
 internal_temp_t tmp112;
+// VOC LP instance
+voc_lp_tag_t voclp;
+
 event_param_t tmp112_event_param = { .next_pub = 0 };
 
 static void barometer_tag_init(bc_i2c_channel_t i2c_channel, barometer_tag_t *tag) {
@@ -118,6 +127,14 @@ static void temperature_tag_init(bc_i2c_channel_t i2c_channel, bc_tag_temperatur
     bc_tag_temperature_init(&tag->self, i2c_channel, i2c_address);
     bc_tag_temperature_set_update_interval(&tag->self, TEMPERATURE_TAG_UPDATE_SERVICE_INTERVAL);
     bc_tag_temperature_set_event_handler(&tag->self, temperature_tag_event_handler, &tag->param);
+}
+
+static void voc_lp_tag_init(bc_i2c_channel_t i2c_channel, voc_lp_tag_t *tag) {
+    memset(tag, 0, sizeof(*tag));
+
+    bc_tag_voc_lp_init(&tag->self, i2c_channel);
+    bc_tag_voc_lp_set_event_handler(&tag->self, voc_lp_tag_event_handler, &tag->param);
+    bc_tag_voc_lp_set_update_interval(&tag->self, VOC_TAG_UPDATE_SERVICE_INTERVAL);
 }
 
 void barometer_tag_event_handler(bc_tag_barometer_t *self, bc_tag_barometer_event_t event, void *event_param) {
@@ -252,6 +269,29 @@ void temperature_tag_event_handler(bc_tag_temperature_t *self, bc_tag_temperatur
     }
 }
 
+void voc_lp_tag_event_handler(bc_tag_voc_lp_t *self, bc_tag_voc_lp_event_t event, void *event_param) {
+    uint16_t value;
+    event_param_t *param = (event_param_t *)event_param;
+
+    if (event != BC_TAG_VOC_LP_EVENT_UPDATE) {
+        return;
+    }
+
+    if (!bc_tag_voc_lp_get_tvoc_ppb(self, &value)) {
+        return;
+    }
+
+    if ((fabsf(value - param->value) >= VOC_TAG_PUB_VALUE_CHANGE) || (param->next_pub < bc_scheduler_get_spin_tick())) {
+        int voc_value = (int)value;
+        bc_radio_pub_int("voc-lp/-/tvoc", &voc_value);
+        param->value = value;
+        param->next_pub = bc_scheduler_get_spin_tick() + VOC_TAG_PUB_NO_CHANGE_INTERVAL;
+
+        bc_log_info("voc - %i ppb", voc_value);
+    }
+}
+
+
 void switch_to_normal_mode_task(void *param) {
     bc_tag_barometer_set_update_interval(&barometer.self, BAROMETER_TAG_UPDATE_NORMAL_INTERVAL);
 
@@ -262,6 +302,8 @@ void switch_to_normal_mode_task(void *param) {
     bc_tag_temperature_set_update_interval(&temperature.self, TEMPERATURE_TAG_UPDATE_NORMAL_INTERVAL);
 
     bc_tmp112_set_update_interval(&tmp112, INTERNAL_TEMPERATURE_UPDATE_NORMAL_INTERVAL);
+
+    bc_tag_voc_lp_set_update_interval(&voclp.self, VOC_TAG_UPDATE_NORMAL_INTERVAL);
 
     bc_scheduler_unregister(bc_scheduler_get_current_task_id());
 }
@@ -293,6 +335,8 @@ void application_init(void) {
     humidity_tag_init(BC_TAG_HUMIDITY_REVISION_R3, BC_I2C_I2C1, &humidity);
     // Initialize lux
     lux_meter_tag_init(BC_I2C_I2C1, BC_TAG_LUX_METER_I2C_ADDRESS_DEFAULT, &lux);
+    // Initialize VOC LP
+    voc_lp_tag_init(BC_I2C_I2C1, &voclp);
 
     bc_log_info("Version: %s", VERSION);
     bc_radio_pairing_request("outdoor-monitor", VERSION);
