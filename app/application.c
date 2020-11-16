@@ -286,9 +286,9 @@ void application_init(void) {
     // Initialize barometer
     barometer_tag_init(BC_I2C_I2C0, &barometer);
     // Initialize battery
-    // bc_module_battery_init();
-    // bc_module_battery_set_event_handler(battery_event_handler, NULL);
-    // bc_module_battery_set_update_interval(BATTERY_UPDATE_INTERVAL);
+    bc_module_battery_init();
+    bc_module_battery_set_event_handler(battery_event_handler, NULL);
+    bc_module_battery_set_update_interval(BATTERY_UPDATE_INTERVAL);
     // Initialize humidity
     humidity_tag_init(BC_TAG_HUMIDITY_REVISION_R3, BC_I2C_I2C1, &humidity);
     // Initialize lux
